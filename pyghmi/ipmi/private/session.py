@@ -171,7 +171,7 @@ def _io_wait(timeout, myaddr=None, evq=None):
         intsock.sendto(b'\x01', (myself, iosockets[0].getsockname()[1]))
     evt.wait()
 
-
+#向地址sockaddr发送报文packet
 def _io_sendto(mysocket, packet, sockaddr):
     # Want sendto to act reasonably sane..
     mysocket.setblocking(1)
@@ -405,18 +405,19 @@ class Session(object):
         return True
 
     def __new__(cls,
-                bmc,
-                userid,
-                password,
-                port=623,
+                bmc,#受控机器
+                userid,#用户名
+                password,#用户密码
+                port=623,#远程端口
                 kg=None,
-                onlogon=None):
+                onlogon=None):#回调
         trueself = None
         forbidsock = []
         for res in socket.getaddrinfo(bmc, port, 0, socket.SOCK_DGRAM):
             sockaddr = res[4]
             if ipv6support and res[0] == socket.AF_INET:
                 # convert the sockaddr to AF_INET6
+                # 当前非ipv6地址，转换为ipv6地址
                 newhost = '::ffff:' + sockaddr[0]
                 sockaddr = (newhost, sockaddr[1], 0, 0)
             if sockaddr in cls.bmc_handlers:
@@ -480,6 +481,7 @@ class Session(object):
         self.pktqueue = collections.deque([])
 
         try:
+            #进行utf-8编码
             self.userid = userid.encode('utf-8')
             self.password = password.encode('utf-8')
         except AttributeError:
@@ -496,9 +498,11 @@ class Session(object):
                 pass
             self.kg = kg
         else:
+            #如果未传入kg,则kg等于password
             self.kg = self.password
         self.port = port
         if onlogon is None:
+            #如果onlogon为None,则为同步
             self.async = False
             self.logonwaiters = [self._sync_login]
         else:
@@ -509,6 +513,7 @@ class Session(object):
         with self.socketchecking:
             self.socket = self._assignsocket(forbiddensockets=self.forbidsock)
         self.login()
+        #同步等待
         if not self.async:
             while self.logging:
                 Session.wait_for_rsp()
@@ -554,9 +559,11 @@ class Session(object):
             self.broken = True
             self.socketpool[self.socket] -= 1
 
+    #逐个触发logon回调
     def onlogon(self, parameter):
         if 'error' in parameter:
             self._mark_broken(parameter['error'])
+        #如果有多个login回调，则pop后一一执行
         while self.logonwaiters:
             waiter = self.logonwaiters.pop()
             waiter(parameter)
@@ -717,6 +724,7 @@ class Session(object):
             while self.iterwaiters:
                 waiter = self.iterwaiters.pop()
                 waiter({'success': True})
+            #处理pktqueue上的报文
             self.process_pktqueue()
             with util.protect(WAITING_SESSIONS):
                 if (self in self.waiting_sessions and
@@ -762,6 +770,7 @@ class Session(object):
         # behavior of only the constructor needing a callback.  From then on,
         # synchronous usage of the class acts in a greenthread style governed
         # by order of data on the network
+        #等待响应
         self.awaitresponse(retry)
         lastresponse = self.lastresponse
         self.incommand = False
@@ -782,12 +791,14 @@ class Session(object):
                 netfn = self.clientnetfn
             if command is None:
                 command = self.clientcommand
+        #构造负载
         ipmipayload = self._make_ipmi_payload(netfn, command, bridge_request,
                                               data)
         payload_type = constants.payload_types['ipmi']
         self.send_payload(payload=ipmipayload, payload_type=payload_type,
                           retry=retry, delay_xmit=delay_xmit, timeout=timeout)
 
+    #组装并发送ipmi负载
     def send_payload(self, payload=(), payload_type=None, retry=True,
                      delay_xmit=None, needskeepalive=False, timeout=None):
         """Send payload over the IPMI Session
@@ -809,12 +820,14 @@ class Session(object):
             # retried separately
             self.pendingpayloads.append((payload, payload_type, retry))
             return
+        #如果未指定负载类型，负载，则设置负载及负载类型
         if payload_type is None:
             payload_type = self.last_payload_type
         if not payload:
             payload = self.lastpayload
         message = [0x6, 0, 0xff, 0x07]  # constant RMCP header for IPMI
         if retry:
+            #如果需要retry,则记录本次发送的负载及负载类型，以便下次访问时使用
             self.lastpayload = payload
             self.last_payload_type = payload_type
         message.append(self.authtype)
@@ -894,6 +907,8 @@ class Session(object):
         with util.protect(KEEPALIVE_SESSIONS):
             if (self in Session.keepalive_sessions and not needskeepalive and
                     not self._customkeepalives):
+                #random.random()会返回一个0到1之间的数
+                #即会有一个最大4.9的误差
                 Session.keepalive_sessions[self]['timeout'] = \
                     _monotonic_time() + MAX_IDLE - (random.random() * 4.9)
             self._xmit_packet(retry, delay_xmit=delay_xmit, timeout=timeout)
@@ -1058,6 +1073,7 @@ class Session(object):
                                         command=0x38,
                                         data=[0x8e, self.privlevel])
 
+    #发送登录请求
     def login(self):
         self.logontries = 5
         self._initsession()
@@ -1101,12 +1117,15 @@ class Session(object):
             with util.protect(WAITING_SESSIONS):
                 for session, parms in dictitems(cls.waiting_sessions):
                     if parms['timeout'] <= curtime:
+                        #发现已过期的session.立即退出检查
                         timeout = 0  # exit after one guaranteed pass
                         break
                     if (timeout is not None and
                             timeout < parms['timeout'] - curtime):
+                        #发现未过期的session,但其过期时间大于timeout,不更新timeout记录
                         continue  # timeout smaller than the current session
                         # needs
+                    #需要更新timeout记录，使用最小者
                     timeout = parms['timeout'] - curtime  # set new timeout
                     # value
             with util.protect(KEEPALIVE_SESSIONS):
@@ -1240,6 +1259,7 @@ class Session(object):
             self._mark_broken()
 
     def process_pktqueue(self):
+        #自pktqueue上出队，并调用相应的解析回调
         while self.pktqueue:
             pkt = list(self.pktqueue.popleft())
             pkt[0] = bytearray(pkt[0])
@@ -1303,6 +1323,7 @@ class Session(object):
                                                *expectedauthcode)
                 if expectedauthcode != authcode:
                     return
+            #解析ipmi负载
             self._parse_ipmi_payload(payload)
         elif data[4] == 6:
             self._handle_ipmi2_packet(data)
@@ -1374,6 +1395,7 @@ class Session(object):
                 padsize = payload[-1] + 1
                 payload = list(payload[:-padsize])
             if ptype == 0:
+                #解析ipmi负载
                 self._parse_ipmi_payload(payload)
             elif ptype == 1:  # There should be no other option
                 if (payload[1] & 0b1111) and self.last_payload_type == 1:
@@ -1634,6 +1656,7 @@ class Session(object):
             self.send_payload(payload=nextpayload,
                               payload_type=nextpayloadtype,
                               retry=retry)
+        #处理响应回调
         self.ipmicallback(response)
 
     def _timedout(self):
@@ -1676,18 +1699,22 @@ class Session(object):
             self.send_payload()
         self.nowait = False
 
+    #向外发送报文
     def _xmit_packet(self, retry=True, delay_xmit=None, timeout=None):
         if self.sequencenumber:  # seq number of zero will be left alone, it is
             # special, otherwise increment
             self.sequencenumber += 1
         if delay_xmit is not None:
+            #如果需要延迟发送，则延迟处理
             with util.protect(WAITING_SESSIONS):
                 Session.waiting_sessions[self] = {}
                 Session.waiting_sessions[self]['ipmisession'] = self
+                #记录哪个时机发送
                 self.expiration = delay_xmit + _monotonic_time()
                 Session.waiting_sessions[self]['timeout'] = self.expiration
             return  # skip transmit, let retry timer do it's thing
         if self.sockaddr:
+            #如果指定了对端socket地址，则向外发送
             _io_sendto(self.socket, self.netpacket, self.sockaddr)
         else:
             # he have not yet picked a working sockaddr for this connection,
@@ -1699,15 +1726,20 @@ class Session(object):
                                               self.port,
                                               0,
                                               socket.SOCK_DGRAM):
+                    #取我们向bmc发送的地址
                     sockaddr = res[4]
                     if ipv6support and res[0] == socket.AF_INET:
                         # convert the sockaddr to AF_INET6
+                        #转为ipv6地址，进行发送
                         newhost = '::ffff:' + sockaddr[0]
                         sockaddr = (newhost, sockaddr[1], 0, 0)
                     self.allsockaddrs.append(sockaddr)
                     if sockaddr not in Session.bmc_handlers:
+                        #向bmc_handlers中添加本地址
                         Session.bmc_handlers[sockaddr] = {}
+                    #使bmc_handlers可以通过port,sockaddr找到当前session
                     Session.bmc_handlers[sockaddr][myport] = self
+                    #向其发送报文
                     _io_sendto(self.socket, self.netpacket, sockaddr)
             except socket.gaierror:
                 raise exc.IpmiException(
@@ -1716,6 +1748,7 @@ class Session(object):
             with util.protect(WAITING_SESSIONS):
                 Session.waiting_sessions[self] = {}
                 Session.waiting_sessions[self]['ipmisession'] = self
+                #更新超时时间
                 if timeout is not None:
                     self.expiration = timeout + _monotonic_time()
                 else:

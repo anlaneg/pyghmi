@@ -28,6 +28,7 @@ import struct
 import uuid
 
 
+#带外通信
 class ServerSession(ipmisession.Session):
     def __new__(cls, authdata, kg, clientaddr, netsocket, request, uuid,
                 bmc):

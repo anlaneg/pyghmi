@@ -18,7 +18,7 @@ import struct
 
 categories = {}
 
-
+#注册各模块详细的解析及命令
 def register_inventory_category(module):
     c = module.get_categories()
     for id in c:
@@ -44,6 +44,7 @@ class EntryField(object):
     """
     def __init__(self, name, fmt, include=True, mapper=None, valuefunc=None,
                  multivaluefunc=False, presence=False):
+        #字段名称
         self.name = name
         self.fmt = fmt
         self.include = include
@@ -54,6 +55,7 @@ class EntryField(object):
 
 
 # General parameter parsing functions
+#通用的raw解析函数
 def parse_inventory_category(name, info, countable=True):
     """Parses every entry in an inventory category (CPU, memory, PCI, drives,
     etc).
@@ -67,10 +69,12 @@ def parse_inventory_category(name, info, countable=True):
 
     :returns: dict -- a list of entries in the category.
     """
+    #待解析的数据
     raw = info["data"][1:]
 
     cur = 0
     if countable:
+        #提取待解析元素的数目
         count = struct.unpack("B", raw[cur])[0]
         cur += 1
     else:
@@ -79,6 +83,7 @@ def parse_inventory_category(name, info, countable=True):
 
     entries = []
     while cur < len(raw):
+        #按模块名称找到对应的解析函数，对raw进行解析（cpu的名称比较扯，写完没有再看过啊。。。。）
         read, cpu = categories[name]["parser"](raw[cur:])
         cur = cur + read
         # Account for discarded entries (because they are not present)
@@ -93,15 +98,17 @@ def parse_inventory_category(name, info, countable=True):
 
     # TODO(avidal): raise specific exception to point that there's data left in
     # the buffer
+    #未成功解析
     if cur != len(raw):
         raise Exception
     # TODO(avidal): raise specific exception to point that the number of
     # entries is different than the expected
+    #数不对，扔异常
     if count - discarded != len(entries):
         raise Exception
     return entries
 
-
+#将2进制的raw按fields顺序转换为dict返回，返回成功解析的字节数
 def parse_inventory_category_entry(raw, fields):
     """Parses one entry in an inventory category.
 

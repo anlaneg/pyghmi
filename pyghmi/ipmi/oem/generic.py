@@ -84,6 +84,7 @@ class OEMHandler(object):
         """
         return ()
 
+    #获取oem可提供的详细信息（对上提供遍历）
     def get_oem_inventory(self):
         """Get tuples of component names and inventory data.
 

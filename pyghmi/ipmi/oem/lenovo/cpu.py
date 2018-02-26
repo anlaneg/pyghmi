@@ -30,6 +30,7 @@ cpu_fields = (
     EntryField("Reserved", "h", include=False))
 
 
+#定义如何自raw中解析出cpu信息字段
 def parse_cpu_info(raw):
     return parse_inventory_category_entry(raw, cpu_fields)
 

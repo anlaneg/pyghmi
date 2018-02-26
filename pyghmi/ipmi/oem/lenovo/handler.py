@@ -361,10 +361,12 @@ class OEMHandler(generic.OEMHandler):
             return True
         return False
 
+    #oem可提供的详细信息
     def get_oem_inventory_descriptions(self):
         if self.has_tsm:
             # Thinkserver with TSM
             if not self.oem_inventory_info:
+                #oem_inventory_info中无数据，收集数据并填充之
                 self._collect_tsm_inventory()
             return iter(self.oem_inventory_info)
         elif self.has_imm:
@@ -413,6 +415,7 @@ class OEMHandler(generic.OEMHandler):
         if self.has_imm:
             return self.immhandler.get_component_inventory(component)
 
+    #遍历并收集注册的所有module信息
     def _collect_tsm_inventory(self):
         self.oem_inventory_info = {}
         for catid, catspec in inventory.categories.items():
@@ -446,6 +449,7 @@ class OEMHandler(generic.OEMHandler):
                     continue
             # Parse the response we got
             try:
+                #解析rsp对应的信息
                 items = inventory.parse_inventory_category(
                     catid, rsp,
                     countable=catspec.get("countable", True)
@@ -459,6 +463,7 @@ class OEMHandler(generic.OEMHandler):
                 try:
                     key = catspec["idstr"].format(item["index"])
                     del item["index"]
+                    #将收集到的信息存入oem_inventory_info中
                     self.oem_inventory_info[key] = item
                 except Exception:
                     # If we can't parse an inventory item, ignore it
@@ -765,6 +770,7 @@ class OEMHandler(generic.OEMHandler):
                 raise
         return self._has_megarac
 
+    #对外提供ipv6的alert目的地址
     def set_alert_ipv6_destination(self, ip, destination, channel):
         if self.has_megarac:
             ethidx = self._megarac_eth_index

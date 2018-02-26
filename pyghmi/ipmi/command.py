@@ -122,7 +122,9 @@ class Command(object):
                  onlogon=None, kg=None):
         # TODO(jbjohnso): accept tuples and lists of each parameter for mass
         # operations without pushing the async complexities up the stack
+        #回调
         self.onlogon = onlogon
+        #指定接受命令的机器
         self.bmc = bmc
         self._sdr = None
         self._oem = None
@@ -130,8 +132,10 @@ class Command(object):
         self._ipv6support = None
         self.certverify = None
         if bmc is None:
+            #如果未指定机器，则与本机器通信（带内）
             self.ipmi_session = localsession.Session()
         elif onlogon is not None:
+            #如果指定机器，则与bmc server通信（带外）
             self.ipmi_session = session.Session(bmc=bmc,
                                                 userid=userid,
                                                 password=password,
@@ -142,6 +146,7 @@ class Command(object):
             # prepared for it in theory
             session.Session.wait_for_rsp(0)
         else:
+            #无onlogon回调的带外通信
             self.ipmi_session = session.Session(bmc=bmc,
                                                 userid=userid,
                                                 password=password,
@@ -164,6 +169,7 @@ class Command(object):
         if type == 'tls':
             self.certverify = callback
 
+    #采用response触发onlogon回调
     def logged(self, response):
         self.onlogon(response, self)
         self.onlogon = None
@@ -190,6 +196,7 @@ class Command(object):
         return {
             'device_id': response['data'][0],
             'device_revision': response['data'][1] & 0b1111,
+            #指明工厂id
             'manufacturer_id': struct.unpack(
                 '<I', struct.pack('3B', *response['data'][6:9]) + b'\x00')[0],
             'product_id': struct.unpack(

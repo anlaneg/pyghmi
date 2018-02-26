@@ -26,6 +26,8 @@ oemmap = {
 
 def get_oem_handler(oemid, ipmicmd):
     try:
+        #依据id号获得厂商对应的Handler对象
         return oemmap[oemid['manufacturer_id']].OEMHandler(oemid, ipmicmd)
     except KeyError:
+        #未识别的vonder
         return generic.OEMHandler(oemid, ipmicmd)

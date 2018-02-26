@@ -42,7 +42,7 @@ fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, currfl | os.O_NONBLOCK)
 
 sol = None
 
-
+#收取控制台输出，并调用sol.send_data处理输入的数据
 def _doinput():
     while True:
         select.select((sys.stdin,), (), (), 600)
@@ -76,7 +76,7 @@ try:
                           iohandler=_print, force=True)
     inputthread = threading.Thread(target=_doinput)
     inputthread.daemon = True
-    inputthread.start()
+    inputthread.start() #启动线程，例_doinput开始运行
     sol.main_loop()
 except Exception:
     currfl = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)

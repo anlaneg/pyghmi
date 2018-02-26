@@ -31,10 +31,12 @@ if (len(sys.argv) < 3) or 'IPMIPASSWORD' not in os.environ:
     print " IPMIPASSWORD=password %s bmc username <cmd> <optarg>" % sys.argv[0]
     sys.exit(1)
 
+#取密码，并将环境变量中的密码清除
 password = os.environ['IPMIPASSWORD']
 os.environ['IPMIPASSWORD'] = ""
 bmc = sys.argv[1]
 userid = sys.argv[2]
+#取命令参数
 args = None
 if len(sys.argv) >= 5:
     args = sys.argv[4:]
@@ -43,11 +45,13 @@ ipmicmd = None
 
 
 def docommand(result, ipmisession):
+    #取命令
     cmmand = sys.argv[3]
     print "Logged into %s" % ipmisession.bmc
     if 'error' in result:
         print result['error']
         return
+    #依据命令执行不同的函数
     if cmmand == 'power':
         if args:
             print ipmisession.set_power(args[0], wait=True)
@@ -79,6 +83,7 @@ def docommand(result, ipmisession):
                                       command=int(args[1]),
                                       data=map(lambda x: int(x, 16), args[2:]))
 
+#支持通过逗号分隔的多个机器，遍历每个机器，执行对应的cmd
 bmcs = string.split(bmc, ",")
 for bmc in bmcs:
     ipmicmd = command.Command(bmc=bmc, userid=userid, password=password,

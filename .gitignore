@@ -11,6 +11,9 @@
 dist
 sdist
 
+.project
+.pydevproject
+.settings/
 # Other
 .testrepository
 AUTHORS

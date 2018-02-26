@@ -64,13 +64,14 @@ BMC_SLAVE_ADDR = c_uint(0x20)
 CURRCHAN = 0xf
 ADDRTYPE = 0xc
 
-
+#带内通信
 class Session(object):
     def __init__(self, devnode='/dev/ipmi0'):
         """Create a local session inband
 
         :param: devnode: The path to the ipmi device
         """
+        #打开本机的ipmidev
         self.ipmidev = open(devnode, 'rw')
         fcntl.ioctl(self.ipmidev, IPMICTL_SET_MY_ADDRESS_CMD, BMC_SLAVE_ADDR)
         # the interface is initted, create some reusable memory for our session
@@ -99,6 +100,7 @@ class Session(object):
             response['error'] = errorstr
         return response
 
+    #采用ioctl与本机的ipmidev进行通信
     def raw_command(self,
                     netfn,
                     command,

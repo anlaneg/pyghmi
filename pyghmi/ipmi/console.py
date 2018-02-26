@@ -71,6 +71,7 @@ class Console(object):
         """Private function to navigate SOL payload activation
         """
         if 'error' in response:
+            #有错误信息
             self._print_error(response['error'])
             return
         # Send activate sol payload directive
