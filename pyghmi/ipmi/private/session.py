@@ -354,6 +354,7 @@ class Session(object):
                 myself = '127.0.0.1'
                 tmpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         else:
+            #创建udp socket
             tmpsocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         if server is None:
             # Rather than wait until send() to bind, bind now so that we have
@@ -408,7 +409,7 @@ class Session(object):
                 bmc,#受控机器
                 userid,#用户名
                 password,#用户密码
-                port=623,#远程端口
+                port=623,#远程端口,按IPMI SPEC说明,RMCP（UDP方式）支持两个端口623，644
                 kg=None,
                 onlogon=None):#回调
         trueself = None
@@ -417,10 +418,12 @@ class Session(object):
             sockaddr = res[4]
             if ipv6support and res[0] == socket.AF_INET:
                 # convert the sockaddr to AF_INET6
-                # 当前非ipv6地址，转换为ipv6地址
+                # 如果支持ipv6,但当前非ipv6地址，转换为ipv6地址
                 newhost = '::ffff:' + sockaddr[0]
+                #指明地址，socktype
                 sockaddr = (newhost, sockaddr[1], 0, 0)
             if sockaddr in cls.bmc_handlers:
+                #检查是否已有对此bmc的连接
                 for portself in list(dictitems(cls.bmc_handlers[sockaddr])):
                     self = portself[1]
                     if not ((self.logged or self.logging) and
@@ -440,7 +443,9 @@ class Session(object):
                     # id, however it's easier this way
                     forbidsock.append(self.socket)
             if trueself:
+                #已存在，使用已存在的
                 return trueself
+            #不存在，新建一个
             self = object.__new__(cls)
             self.forbidsock = forbidsock
             return self
@@ -453,6 +458,7 @@ class Session(object):
                  kg=None,
                  onlogon=None):
         if hasattr(self, 'initialized'):
+            #检查是否被初始化过
             # new found an existing session, do not corrupt it
             if onlogon is None:
                 while self.logging:
@@ -475,13 +481,14 @@ class Session(object):
         self._customkeepalives = None
         # queue of events denoting line to run a cmd
         self.evq = collections.deque([])
+        #记录bmc地址
         self.bmc = bmc
         # a private queue for packets for which this session handler
         # is destined to receive
         self.pktqueue = collections.deque([])
 
         try:
-            #进行utf-8编码
+            #对用户名，密码进行utf-8编码
             self.userid = userid.encode('utf-8')
             self.password = password.encode('utf-8')
         except AttributeError:
@@ -491,6 +498,7 @@ class Session(object):
         self.pendingpayloads = collections.deque([])
         self.request_entry = []
         self.kgo = kg
+        #对kg进行赋值
         if kg is not None:
             try:
                 kg = kg.encode('utf-8')
@@ -500,6 +508,7 @@ class Session(object):
         else:
             #如果未传入kg,则kg等于password
             self.kg = self.password
+        #记录bmc端口
         self.port = port
         if onlogon is None:
             #如果onlogon为None,则为同步
@@ -511,7 +520,9 @@ class Session(object):
         if self.__class__.socketchecking is None:
             self.__class__.socketchecking = threading.Lock()
         with self.socketchecking:
+            #创建连接socket
             self.socket = self._assignsocket(forbiddensockets=self.forbidsock)
+        #登录到bmc
         self.login()
         #同步等待
         if not self.async:
@@ -584,6 +595,7 @@ class Session(object):
         self.sequencenumber = 0
         self.sessionid = 0
         self.authtype = 0
+        #采用那种ipmi版本
         self.ipmiversion = 1.5
         self.timeout = initialtimeout + (0.5 * random.random())
         self.seqlun = 0
@@ -791,7 +803,7 @@ class Session(object):
                 netfn = self.clientnetfn
             if command is None:
                 command = self.clientcommand
-        #构造负载
+        #构造ipmi负载
         ipmipayload = self._make_ipmi_payload(netfn, command, bridge_request,
                                               data)
         payload_type = constants.payload_types['ipmi']
@@ -825,11 +837,20 @@ class Session(object):
             payload_type = self.last_payload_type
         if not payload:
             payload = self.lastpayload
+        #自ipmi spec 13.6 IPMI over LAN Packet using IPv4 可以获知以下
+        #在message的前面是RSP header,在RSP header的前面是UDP header,在UDP header的前面是ip header
+        #message是RMCP header,其后面是ipmi session header,再后面是ipmi payload,再后面是IPMI Session Trailer [9] /RSP Trailer
+        #最后面是crc
+        
+        #rmcp version=0x6,Reserved=0x0,RMCP seq=0xff(指出ipmi),class_message=0x7 (指出ipmi)
         message = [0x6, 0, 0xff, 0x07]  # constant RMCP header for IPMI
         if retry:
             #如果需要retry,则记录本次发送的负载及负载类型，以便下次访问时使用
             self.lastpayload = payload
             self.last_payload_type = payload_type
+        #ipmi session header的字段
+        #Auth Type / Format 取值说明  0h = none，1h = MD2，2h = MD5，3h = reserved，4h = straight password /key
+        # 5h = OEM proprietary,6h = Format = RMCP+(IPMI v2.0 only),all other = reserved
         message.append(self.authtype)
         baretype = payload_type
         if self.integrityalgo:
@@ -837,20 +858,28 @@ class Session(object):
         if self.confalgo:
             payload_type |= 0b10000000
         if self.ipmiversion == 2.0:
+            #ipmi 2.0中指出payload类型
             message.append(payload_type)
             if baretype == 2:
+                #按ipmi规定，如果payload_type == 2,则为OEM Explicit
                 # TODO(jbjohnso): OEM payload types
                 raise NotImplementedError("OEM Payloads")
             elif baretype not in constants.payload_types.values():
+                #非指定的ipmi2.0中规定的,丢异常
                 raise NotImplementedError(
                     "Unrecognized payload type %d" % baretype)
+            #ipmi2.0中OEM IANA，OEM Payload ID，payload_type不为2，故不需要出现
+            #添加4字节的IPMI v2.0 RMCP+ Session ID
             message += struct.unpack("!4B", struct.pack("<I", self.sessionid))
+        #添加4字节的 Session Sequence Number
         message += struct.unpack("!4B", struct.pack("<I", self.sequencenumber))
         if self.ipmiversion == 1.5:
             message += struct.unpack("!4B", struct.pack("<I", self.sessionid))
             if not self.authtype == 0:
                 message += self._ipmi15authcode(payload)
+            #添加负载长度IPMI Msg/Payload length
             message.append(len(payload))
+            #添加负载
             message += payload
             # Guessing the ipmi spec means the whole
             totlen = 34 + len(message)
@@ -873,13 +902,16 @@ class Session(object):
                 iv = os.urandom(16)
                 message += list(struct.unpack("16B", iv))
                 payloadtocrypt = _aespad(payload)
+                #进行aes加密
                 crypter = AES.new(self.aeskey, AES.MODE_CBC, iv)
                 crypted = crypter.encrypt(struct.pack("%dB" %
                                                       len(payloadtocrypt),
                                                       *payloadtocrypt))
                 crypted = list(struct.unpack("%dB" % len(crypted), crypted))
+                #加密后的内容
                 message += crypted
             else:  # no confidetiality algorithm
+                #psize占用两个字节，故先取oxff再取高位
                 message.append(psize & 0xff)
                 message.append(psize >> 8)
                 message += list(payload)
@@ -901,6 +933,7 @@ class Session(object):
                                     hashlib.sha1).digest()[:12]  # SHA1-96
                 # per RFC2404 truncates to 96 bits
                 message += struct.unpack("12B", authcode)
+        #将message生成字节数组
         self.netpacket = struct.pack("!%dB" % len(message), *message)
         # advance idle timer since we don't need keepalive while sending
         # packets out naturally
@@ -941,6 +974,7 @@ class Session(object):
 
     def _got_channel_auth_cap(self, response):
         if 'error' in response:
+            #登录失败，触发回调
             self.onlogon(response)
             return
         self.maxtimeout = 6  # we have a confirmed bmc, be more tenacious
@@ -948,6 +982,7 @@ class Session(object):
             # tried ipmi 2.0 against a 1.5 which should work, but some bmcs
             # thought 'reserved' meant 'must be zero'
             self.ipmi15only = 1
+            #将ipmi版本更改为1.5并重新请求授权
             return self._get_channel_auth_cap()
         mysuffix = " while trying to get channel authentication capabalities"
         errstr = get_ipmi_error(response, suffix=mysuffix)
@@ -995,6 +1030,7 @@ class Session(object):
             self.onlogon({'error': errstr})
             return
         data = response['data']
+        #取session-id,顺序编号
         self.sessionid = struct.unpack("<I", struct.pack("4B", *data[1:5]))[0]
         self.sequencenumber = struct.unpack("<I",
                                             struct.pack("4B", *data[5:9]))[0]
@@ -1026,6 +1062,7 @@ class Session(object):
             Session.keepalive_sessions[self]['ipmisession'] = self
             Session.keepalive_sessions[self]['timeout'] = _monotonic_time() + \
                 MAX_IDLE - (random.random() * 4.9)
+        #执行登录成功回调
         self.onlogon({'success': True})
 
     def _get_session_challenge(self):
@@ -1063,7 +1100,9 @@ class Session(object):
             payload_type=constants.payload_types['rmcpplusopenreq'])
 
     def _get_channel_auth_cap(self):
+        #注册请求消息的回调
         self.ipmicallback = self._got_channel_auth_cap
+        #默认采用ipmi2.0故self.ipmi15only为Fasle
         if self.ipmi15only:
             self._send_ipmi_net_payload(netfn=0x6,
                                         command=0x38,
@@ -1326,6 +1365,7 @@ class Session(object):
             #解析ipmi负载
             self._parse_ipmi_payload(payload)
         elif data[4] == 6:
+            #处理ipmi2.0报文
             self._handle_ipmi2_packet(data)
         else:
             return  # unrecognized data, assume evil

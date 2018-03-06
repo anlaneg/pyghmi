@@ -20,6 +20,7 @@ IPMI_BMC_ADDRESS = 0x20
 IPMI_SEND_MESSAGE_CMD = 0x34
 
 
+#ipmi2.0 payload类型定义
 payload_types = {
     'ipmi': 0x0,
     'sol': 0x1,

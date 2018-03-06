@@ -65,6 +65,7 @@ class ServerSession(ipmisession.Session):
         self.rqaddr = constants.IPMI_BMC_ADDRESS
         self.authdata = authdata
         self.servermode = True
+        #使用ipmi2.0版本
         self.ipmiversion = 2.0
         self.sequencenumber = 0
         self.sessionid = 0
