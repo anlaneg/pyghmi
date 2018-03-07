@@ -470,7 +470,9 @@ class EventHandler(object):
             raise pygexc.InvalidParameterValue(
                 'specifictrap should be integer number or 4 byte array')
         specifictrap = bytearray(specifictrap)
+        #传感器类型
         sensor_type = specifictrap[1]
+        #传感器事件类型
         event_type = specifictrap[2]
         # Event Offset is in first event data byte, so no need to fetch it here
         # evtoffset = specifictrap[3] & 0b1111
