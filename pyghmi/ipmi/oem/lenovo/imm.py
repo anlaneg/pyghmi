@@ -167,24 +167,35 @@ class IMMClient(object):
                     isinstance(changeset[key], unicode)):
                 changeset[key] = {'value': changeset[key]}
             newvalue = changeset[key]['value']
-            if (self.fwo[key]['possible'] and
-                    newvalue not in self.fwo[key]['possible']):
-                candlist = []
-                for candidate in self.fwo[key]['possible']:
-                    if newvalue.lower().startswith(candidate.lower()):
-                        newvalue = candidate
-                        break
-                    if candidate.lower().startswith(newvalue.lower()):
-                        candlist.append(candidate)
-                else:
-                    if len(candlist) == 1:
-                        newvalue = candlist[0]
+            if self.fwo[key]['is_list'] and not isinstance(newvalue, list):
+                newvalues = newvalue.split(',')
+            else:
+                newvalues = [newvalue]
+            newnewvalues = []
+            for newvalue in newvalues:
+                if (self.fwo[key]['possible'] and
+                        newvalue not in self.fwo[key]['possible']):
+                    candlist = []
+                    for candidate in self.fwo[key]['possible']:
+                        if newvalue.lower().startswith(candidate.lower()):
+                            newvalue = candidate
+                            break
+                        if candidate.lower().startswith(newvalue.lower()):
+                            candlist.append(candidate)
                     else:
-                        raise pygexc.InvalidParameterValue(
-                            '{0} is not a valid value for {1} ({2})'.format(
-                                newvalue, key,
-                                ','.join(self.fwo[key]['possible'])))
-            self.fwo[key]['new_value'] = newvalue
+                        if len(candlist) == 1:
+                            newvalue = candlist[0]
+                        else:
+                            raise pygexc.InvalidParameterValue(
+                                '{0} is not a valid value for {1} '
+                                '({2})'.format(
+                                    newvalue, key,
+                                    ','.join(self.fwo[key]['possible'])))
+                newnewvalues.append(newvalue)
+            if len(newnewvalues) == 1:
+                self.fwo[key]['new_value'] = newnewvalues[0]
+            else:
+                self.fwo[key]['new_value'] = newnewvalues
         if changeset:
             try:
                 self.fwc.set_fw_options(self.fwo)
@@ -413,7 +424,11 @@ class IMMClient(object):
         hwmap = {}
         enclosureuuid = self.get_property('/v2/ibmc/smm/chassis/uuid')
         if enclosureuuid:
-            hwmap['Enclosure'] = {'UUID': fixup_uuid(enclosureuuid)}
+            bay = self.get_property('/v2/cmm/sp/7')
+            hwmap['Enclosure'] = {
+                'UUID': fixup_uuid(enclosureuuid),
+                'Bay': bay,
+            }
         adapterdata = self.get_cached_data('lenovo_cached_adapters')
         if not adapterdata:
             if self.updating:
@@ -469,55 +484,63 @@ class IMMClient(object):
         self.weblogout()
         return hwmap
 
-    def get_firmware_inventory(self, bmcver):
+    def get_firmware_inventory(self, bmcver, components):
         # First we fetch the system firmware found in imm properties
         # then check for agentless, if agentless, get adapter info using
         # https, using the caller TLS verification scheme
-        rsp = self.ipmicmd.xraw_command(netfn=0x3a, command=0x50)
-        immverdata = self.parse_imm_buildinfo(rsp['data'])
-        bdata = {
-            'version': bmcver, 'build': immverdata[0], 'date': immverdata[1]}
-        yield (self.bmcname, bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/ibmc/dm/fw/imm2/backup_build_id',
-            'version': '/v2/ibmc/dm/fw/imm2/backup_build_version',
-            'date': '/v2/ibmc/dm/fw/imm2/backup_build_date'})
-        if bdata:
-            yield ('{0} Backup'.format(self.bmcname), bdata)
+        components = set(components)
+        if not components or set(('imm', 'xcc', 'bmc', 'core')) & components:
+            rsp = self.ipmicmd.xraw_command(netfn=0x3a, command=0x50)
+            immverdata = self.parse_imm_buildinfo(rsp['data'])
+            bdata = {
+                'version': bmcver, 'build': immverdata[0],
+                'date': immverdata[1]}
+            yield (self.bmcname, bdata)
             bdata = self.fetch_grouped_properties({
-                'build': '/v2/ibmc/trusted_buildid',
-            })
-        if bdata:
-            yield ('{0} Trusted Image'.format(self.bmcname), bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/bios/build_id',
-            'version': '/v2/bios/build_version',
-            'date': '/v2/bios/build_date'})
-        if bdata:
-            yield ('UEFI', bdata)
-        else:
-            yield ('UEFI', {'version': 'unknown'})
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/ibmc/dm/fw/bios/backup_build_id',
-            'version': '/v2/ibmc/dm/fw/bios/backup_build_version'})
-        if bdata:
-            yield ('UEFI Backup', bdata)
-        # Note that the next pending could be pending for either primary
-        # or backup, so can't promise where it will go
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/bios/pending_build_id'})
-        if bdata:
-            yield ('UEFI Pending Update', bdata)
-        try:
-            fpga = self.ipmicmd.xraw_command(netfn=0x3a, command=0x6b,
-                                             data=(0,))
-            fpga = '{0}.{1}.{2}'.format(*[ord(x) for x in fpga['data']])
-            yield ('FPGA', {'version': fpga})
-        except pygexc.IpmiException as ie:
-            if ie.ipmicode != 193:
-                raise
-        for firm in self.fetch_agentless_firmware():
-            yield firm
+                'build': '/v2/ibmc/dm/fw/imm2/backup_build_id',
+                'version': '/v2/ibmc/dm/fw/imm2/backup_build_version',
+                'date': '/v2/ibmc/dm/fw/imm2/backup_build_date'})
+            if bdata:
+                yield ('{0} Backup'.format(self.bmcname), bdata)
+                bdata = self.fetch_grouped_properties({
+                    'build': '/v2/ibmc/trusted_buildid',
+                })
+            if bdata:
+                yield ('{0} Trusted Image'.format(self.bmcname), bdata)
+        if not components or set(('uefi', 'bios', 'core')) & components:
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/bios/build_id',
+                'version': '/v2/bios/build_version',
+                'date': '/v2/bios/build_date'})
+            if bdata:
+                yield ('UEFI', bdata)
+            else:
+                yield ('UEFI', {'version': 'unknown'})
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/ibmc/dm/fw/bios/backup_build_id',
+                'version': '/v2/ibmc/dm/fw/bios/backup_build_version'})
+            if bdata:
+                yield ('UEFI Backup', bdata)
+            # Note that the next pending could be pending for either primary
+            # or backup, so can't promise where it will go
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/bios/pending_build_id'})
+            if bdata:
+                yield ('UEFI Pending Update', bdata)
+        if not components or set(('fpga', 'core')) & components:
+            try:
+                fpga = self.ipmicmd.xraw_command(netfn=0x3a, command=0x6b,
+                                                 data=(0,))
+                fpga = '{0}.{1}.{2}'.format(*[ord(x) for x in fpga['data']])
+                yield ('FPGA', {'version': fpga})
+            except pygexc.IpmiException as ie:
+                if ie.ipmicode != 193:
+                    raise
+        if (not components or (components - set((
+                'core', 'uefi', 'bios', 'bmc', 'xcc', 'imm', 'fpga',
+                'lxpm')))):
+            for firm in self.fetch_agentless_firmware():
+                yield firm
 
 
 class XCCClient(IMMClient):
@@ -532,6 +555,10 @@ class XCCClient(IMMClient):
     BUSNO = 'generic_busNo'
     PORTS = 'network_pPorts'
     DEVNO = 'generic_devNo'
+
+    def __init__(self, ipmicmd):
+        super(XCCClient, self).__init__(ipmicmd)
+        self.adp_referer = None
 
     def get_webclient(self):
         cv = self.ipmicmd.certverify
@@ -859,7 +886,9 @@ class XCCClient(IMMClient):
             rq['Protocol'] = 7
             rq['Url'] = url
         else:
-            raise Exception('TODO')
+            raise pygexc.UnsupportedFunctionality(
+                '"{0}" scheme is not supported on this system or '
+                'invalid url format'.format(proto))
         rt = self.wc.grab_json_response('/api/providers/rp_vm_remote_connect',
                                         json.dumps(rq))
         if 'return' not in rt or rt['return'] != 0:
@@ -883,85 +912,95 @@ class XCCClient(IMMClient):
     def keepalive(self):
         self._refresh_token_wc(self._keepalivesession)
 
-    def get_firmware_inventory(self, bmcver):
+    def get_firmware_inventory(self, bmcver, components):
         # First we fetch the system firmware found in imm properties
         # then check for agentless, if agentless, get adapter info using
         # https, using the caller TLS verification scheme
-        rsp = self.ipmicmd.xraw_command(netfn=0x3a, command=0x50)
-        immverdata = self.parse_imm_buildinfo(rsp['data'])
-        bdata = {
-            'version': bmcver, 'build': immverdata[0], 'date': immverdata[1]}
-        yield (self.bmcname, bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/ibmc/dm/fw/imm3/backup_pending_build_id',
-            'version': '/v2/ibmc/dm/fw/imm3/backup_pending_build_version',
-            'date': '/v2/ibmc/dm/fw/imm3/backup_pending_build_date'})
-        if bdata:
-            yield ('{0} Backup'.format(self.bmcname), bdata)
-        else:
+        components = set(components)
+        if (not components or
+                set(('core', 'imm', 'bmc', 'xcc')) & components):
+            rsp = self.ipmicmd.xraw_command(netfn=0x3a, command=0x50)
+            immverdata = self.parse_imm_buildinfo(rsp['data'])
+            bdata = {'version': bmcver,
+                     'build': immverdata[0],
+                     'date': immverdata[1]}
+            yield (self.bmcname, bdata)
             bdata = self.fetch_grouped_properties({
-                'build': '/v2/ibmc/dm/fw/imm3/backup_build_id',
-                'version': '/v2/ibmc/dm/fw/imm3/backup_build_version',
-                'date': '/v2/ibmc/dm/fw/imm3/backup_build_date'})
+                'build': '/v2/ibmc/dm/fw/imm3/backup_pending_build_id',
+                'version': '/v2/ibmc/dm/fw/imm3/backup_pending_build_version',
+                'date': '/v2/ibmc/dm/fw/imm3/backup_pending_build_date'})
             if bdata:
                 yield ('{0} Backup'.format(self.bmcname), bdata)
+            else:
+                bdata = self.fetch_grouped_properties({
+                    'build': '/v2/ibmc/dm/fw/imm3/backup_build_id',
+                    'version': '/v2/ibmc/dm/fw/imm3/backup_build_version',
+                    'date': '/v2/ibmc/dm/fw/imm3/backup_build_date'})
+                if bdata:
+                    yield ('{0} Backup'.format(self.bmcname), bdata)
+                    bdata = self.fetch_grouped_properties({
+                        'build': '/v2/ibmc/trusted_buildid',
+                    })
+            if bdata:
                 bdata = self.fetch_grouped_properties({
                     'build': '/v2/ibmc/trusted_buildid',
                 })
-        if bdata:
+            if bdata:
+                yield ('{0} Trusted Image'.format(self.bmcname), bdata)
             bdata = self.fetch_grouped_properties({
-                'build': '/v2/ibmc/trusted_buildid',
+                'build': '/v2/ibmc/dm/fw/imm3/primary_pending_build_id',
+                'version': '/v2/ibmc/dm/fw/imm3/primary_pending_build_version',
+                'date': '/v2/ibmc/dm/fw/imm3/primary_pending_build_date'})
+            if bdata:
+                yield ('{0} Pending Update'.format(self.bmcname), bdata)
+        if (not components or set(('core', 'uefi', 'bios')) & components):
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/bios/build_id',
+                'version': '/v2/bios/build_version',
+                'date': '/v2/bios/build_date'})
+            if bdata:
+                yield ('UEFI', bdata)
+            # Note that the next pending could be pending for either primary
+            # or backup, so can't promise where it will go
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/bios/pending_build_id'})
+            if bdata:
+                yield ('UEFI Pending Update', bdata)
+        if not components or set(('lxpm', 'core')) & components:
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/tdm/build_id',
+                'version': '/v2/tdm/build_version',
+                'date': '/v2/tdm/build_date'})
+            if bdata:
+                yield ('LXPM', bdata)
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/drvwn/build_id',
+                'version': '/v2/drvwn/build_version',
+                'date': '/v2/drvwn/build_date',
             })
-        if bdata:
-            yield ('{0} Trusted Image'.format(self.bmcname), bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/ibmc/dm/fw/imm3/primary_pending_build_id',
-            'version': '/v2/ibmc/dm/fw/imm3/primary_pending_build_version',
-            'date': '/v2/ibmc/dm/fw/imm3/primary_pending_build_date'})
-        if bdata:
-            yield ('{0} Pending Update'.format(self.bmcname), bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/bios/build_id',
-            'version': '/v2/bios/build_version',
-            'date': '/v2/bios/build_date'})
-        if bdata:
-            yield ('UEFI', bdata)
-        # Note that the next pending could be pending for either primary
-        # or backup, so can't promise where it will go
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/bios/pending_build_id'})
-        if bdata:
-            yield ('UEFI Pending Update', bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/tdm/build_id',
-            'version': '/v2/tdm/build_version',
-            'date': '/v2/tdm/build_date'})
-        if bdata:
-            yield ('LXPM', bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/drvwn/build_id',
-            'version': '/v2/drvwn/build_version',
-            'date': '/v2/drvwn/build_date',
-        })
-        if bdata:
-            yield ('LXPM Windows Driver Bundle', bdata)
-        bdata = self.fetch_grouped_properties({
-            'build': '/v2/drvln/build_id',
-            'version': '/v2/drvln/build_version',
-            'date': '/v2/drvln/build_date',
-        })
-        if bdata:
-            yield ('LXPM Linux Driver Bundle', bdata)
-        try:
-            fpga = self.ipmicmd.xraw_command(netfn=0x3a, command=0x6b,
-                                             data=(0,))
-            fpga = '{0}.{1}.{2}'.format(*[ord(x) for x in fpga['data']])
-            yield ('FPGA', {'version': fpga})
-        except pygexc.IpmiException as ie:
-            if ie.ipmicode != 193:
-                raise
-        for firm in self.fetch_agentless_firmware():
-            yield firm
+            if bdata:
+                yield ('LXPM Windows Driver Bundle', bdata)
+            bdata = self.fetch_grouped_properties({
+                'build': '/v2/drvln/build_id',
+                'version': '/v2/drvln/build_version',
+                'date': '/v2/drvln/build_date',
+            })
+            if bdata:
+                yield ('LXPM Linux Driver Bundle', bdata)
+        if not components or set(('core', 'fpga')) in components:
+            try:
+                fpga = self.ipmicmd.xraw_command(netfn=0x3a, command=0x6b,
+                                                 data=(0,))
+                fpga = '{0}.{1}.{2}'.format(*[ord(x) for x in fpga['data']])
+                yield ('FPGA', {'version': fpga})
+            except pygexc.IpmiException as ie:
+                if ie.ipmicode != 193:
+                    raise
+        if (not components or components - set((
+                'core', 'uefi', 'bios', 'xcc', 'bmc', 'imm', 'fpga',
+                'lxpm'))):
+            for firm in self.fetch_agentless_firmware():
+                yield firm
 
     def detach_remote_media(self):
         if self.webkeepalive:
@@ -991,7 +1030,14 @@ class XCCClient(IMMClient):
         rt = self.wc.grab_json_response('/api/providers/rp_vm_remote_getdisk')
         if 'items' in rt:
             for mt in rt['items']:
-                yield media.Media(mt['filename'], mt['remotepath'])
+                url = mt['remotepath']
+                if url.startswith('//'):
+                    url = 'smb:' + url
+                elif (not url.startswith('http://') and
+                      not url.startswith('https://')):
+                    url = url.replace(':', '')
+                    url = 'nfs://' + url
+                yield media.Media(mt['filename'], url)
         rt = self.wc.grab_json_response('/api/providers/rp_rdoc_imagelist')
         if 'items' in rt:
             for mt in rt['items']:
@@ -1014,7 +1060,8 @@ class XCCClient(IMMClient):
             self._refresh_token()
         rsp = json.loads(uploadthread.rsp)
         if progress:
-            progress({'phase': 'complete'})
+            progress({'phase': 'upload',
+                      'progress': 100.0})
         thepath = rsp['items'][0]['path']
         thename = rsp['items'][0]['name']
         writeable = 1 if filename.lower().endswith('.img') else 0
@@ -1025,10 +1072,16 @@ class XCCClient(IMMClient):
                                          addfile)
         if rsp['return'] != 0:
             raise Exception('Unrecognized return: ' + repr(rsp))
+        rsp = self.wc.grab_json_response('/api/providers/rp_rdoc_getfiles')
+        if 'items' not in rsp or len(rsp['items']) == 0:
+            raise Exception(
+                'Image upload was not accepted, it may be too large')
         rsp = self.wc.grab_json_response('/api/providers/rp_rdoc_mountall',
                                          {})
         if rsp['return'] != 0:
             raise Exception('Unrecognized return: ' + repr(rsp))
+        if progress:
+            progress({'phase': 'complete'})
         self.weblogout()
 
     def update_firmware(self, filename, data=None, progress=None, bank=None):

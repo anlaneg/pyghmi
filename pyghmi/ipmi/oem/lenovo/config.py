@@ -251,7 +251,7 @@ class LenovoFirmwareConfig(object):
     def get_fw_options(self):
         options = {}
         data = None
-        for i in range(0, 15):
+        for i in range(0, 30):
             filehandle = self.imm_open("config.efi")
             size = self.imm_size("config.efi")
             data = self.imm_read(filehandle, size)
@@ -265,6 +265,9 @@ class LenovoFirmwareConfig(object):
         sortid = 0
         for config in xml.iter("config"):
             lenovo_id = config.get("ID")
+            if lenovo_id == 'iSCSI':
+                # Do not support iSCSI at this time
+                continue
             for group in config.iter("group"):
                 lenovo_group = group.get("ID")
                 for setting in group.iter("setting"):
@@ -284,10 +287,28 @@ class LenovoFirmwareConfig(object):
                     reset = False
                     name = setting.find("mriName").text
                     help = setting.find("desc").text
-
-                    if setting.find("list_data") is not None:
+                    onedata = setting.find('text_data')
+                    if onedata is None:
+                        onedata = setting.find('numeric_data')
+                    if onedata is not None:
+                        if onedata.get('maxinstance') is not None:
+                            protect = True  # Not yet supported
+                        else:
+                            instance = onedata.find('instance')
+                            if instance is None:
+                                protect = True  # not supported yet
+                            else:
+                                current = instance.text
+                    if (setting.find('cmd_data') is not None or
+                            setting.find('boolean_data') is not None):
+                        protect = True  # Hide currently unsupported settings
+                    ldata = setting.find("list_data")
+                    extraorder = False
+                    currentdict = {}
+                    if ldata is not None:
                         is_list = True
                         current = []
+                        extraorder = ldata.get('ordered') == 'true'
                     lenovo_value = None
                     for choice in setting.iter("choice"):
                         label = choice.find("label").text
@@ -295,7 +316,11 @@ class LenovoFirmwareConfig(object):
                         instance = choice.find("instance")
                         if instance is not None:
                             if is_list:
-                                current.append(label)
+                                if not extraorder:
+                                    current.append(label)
+                                else:
+                                    currentdict[
+                                        int(instance.get("order"))] = label
                             else:
                                 current = label
                                 try:
@@ -307,6 +332,9 @@ class LenovoFirmwareConfig(object):
                             default = label
                         if choice.get("reset-required") == "true":
                             reset = True
+                    if len(currentdict) > 0:
+                        for order in sorted(currentdict):
+                            current.append(currentdict[order])
                     optionname = "%s.%s" % (lenovo_id, name)
                     options[optionname] = dict(current=current,
                                                default=default,
