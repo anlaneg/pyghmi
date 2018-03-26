@@ -1,3 +1,4 @@
+# encoding:utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2015-2017 Lenovo
@@ -602,8 +603,11 @@ class OEMHandler(generic.OEMHandler):
 
     def get_oem_firmware(self, bmcver, components):
         if self.has_tsm:
+            #取firmware的配置
             command = firmware.get_categories()["firmware"]
+            #取命令字段发送
             rsp = self.ipmicmd.xraw_command(**command["command"])
+            #完成内容解析
             return command["parser"](rsp["data"])
         elif self.has_imm:
             return self.immhandler.get_firmware_inventory(bmcver, components)

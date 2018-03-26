@@ -1,3 +1,4 @@
+# encoding:utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2015 Lenovo
@@ -16,7 +17,7 @@
 
 from pyghmi.ipmi.oem.lenovo.inventory import EntryField, \
     parse_inventory_category_entry
-
+#指明raw格式的消息结构，也相当于定义了结构体（类型为dict,每个field是实体的key)
 cpu_fields = (
     EntryField("index", "B"),
     EntryField("Cores", "B"),
@@ -31,6 +32,7 @@ cpu_fields = (
 
 
 #定义如何自raw中解析出cpu信息字段
+#有两个返回值，1返回解析的raw长度，2返回解析的对象取值
 def parse_cpu_info(raw):
     return parse_inventory_category_entry(raw, cpu_fields)
 
@@ -38,7 +40,7 @@ def parse_cpu_info(raw):
 def get_categories():
     return {
         "cpu": {
-            "idstr": "CPU {0}",
+            "idstr": "CPU {0}",#用于格式化每一个实例，{0}为0，1，2。。。。
             "parser": parse_cpu_info,
             "command": {
                 "netfn": 0x06,

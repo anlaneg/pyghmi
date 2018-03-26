@@ -62,7 +62,7 @@ def parse_drive_info(raw):
 def get_categories():
     return {
         "drive": {
-            "idstr": "Drive {0}",
+            "idstr": "Drive {0}",#用于字符串格式化
             "parser": parse_drive_info,
             "command": {
                 "netfn": 0x06,

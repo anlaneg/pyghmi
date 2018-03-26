@@ -1,3 +1,4 @@
+# encoding:utf-8
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 
 # Copyright 2015 Lenovo
@@ -55,7 +56,7 @@ class EntryField(object):
 
 
 # General parameter parsing functions
-#通用的raw解析函数
+#通用的raw解析函数$name的数据
 def parse_inventory_category(name, info, countable=True):
     """Parses every entry in an inventory category (CPU, memory, PCI, drives,
     etc).
@@ -83,7 +84,8 @@ def parse_inventory_category(name, info, countable=True):
 
     entries = []
     while cur < len(raw):
-        #按模块名称找到对应的解析函数，对raw进行解析（cpu的名称比较扯，写完没有再看过啊。。。。）
+        #按模块名称找到对应的解析函数，对raw进行解析（变量名称cpu，名字取的比较扯，写完没有再看过啊。。。。）
+        #返回成功解析的字节数
         read, cpu = categories[name]["parser"](raw[cur:])
         cur = cur + read
         # Account for discarded entries (because they are not present)
